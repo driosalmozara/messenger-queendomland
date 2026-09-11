@@ -18,6 +18,8 @@ body{overflow:hidden}
 #topbar h1{font-size:18px;margin:0;flex:1}
 #topbar .tbtn{background:transparent!important;border:1px solid rgba(201,162,75,.4)!important;
   color:var(--gold-light)!important;border-radius:999px;padding:6px 10px!important;font-size:14px;min-height:0}
+.ibtn{background:transparent!important;border:1px solid rgba(201,162,75,.4)!important;
+  color:var(--gold-light)!important;border-radius:999px;padding:5px 10px!important;font-size:12px;min-height:0}
 #mirror-dot{width:9px;height:9px;border-radius:50%;background:#7c3aed;box-shadow:0 0 8px #7c3aed;display:none}
 #tabbar{position:fixed;bottom:0;left:0;right:0;z-index:60;display:flex;
   padding:8px 8px calc(8px + env(safe-area-inset-bottom));background:rgba(13,12,10,.97)!important;
@@ -31,7 +33,6 @@ body{overflow:hidden}
   font-size:9px;padding:1px 5px;display:none}
 main{position:fixed;top:calc(52px + env(safe-area-inset-top));bottom:calc(56px + env(safe-area-inset-bottom));
   left:0;right:0;overflow-y:auto;padding:12px;max-width:760px;margin:0 auto}
-main.full{top:calc(52px + env(safe-area-inset-top))}
 .rowitem{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid rgba(201,162,75,.18);
   border-radius:12px;margin:8px 0;background:rgba(255,255,255,.02);cursor:pointer}
 .rowitem .ava{width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);
@@ -50,8 +51,8 @@ main.full{top:calc(52px + env(safe-area-inset-top))}
 .bub .who{display:block;font-size:11px;color:var(--gold);margin-bottom:2px}
 .bub .tm{display:block;font-size:10px;color:#71717a;margin-top:4px;text-align:right}
 .bub img,.bub video{max-width:100%;border-radius:10px;margin-top:4px;display:block}
-#conv-input{display:flex;gap:6px;padding:10px 2px 4px;border-top:1px solid rgba(201,162,75,.2)}
-#conv-input input{flex:1;margin:0!important}
+#conv-input{display:flex;gap:6px;padding:10px 2px 4px;border-top:1px solid rgba(201,162,75,.2);align-items:center}
+#conv-input input#msg-in{flex:1;margin:0!important}
 #conv-input button{min-height:0;padding:10px 14px!important}
 .sup-banner{background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.5);color:#c4b5fd;
   border-radius:10px;padding:8px 12px;font-size:12px;margin:0 0 8px}
@@ -74,7 +75,7 @@ main.full{top:calc(52px + env(safe-area-inset-top))}
 <nav id="tabbar">
   <button id="tab-rooms" class="on" onclick="goView('rooms')"><span class="ico">#</span>Chats<span class="bdg" id="bdg-rooms"></span></button>
   <button id="tab-dms" onclick="goView('dms')"><span class="ico">💬</span>Mensajes<span class="bdg" id="bdg-dms"></span></button>
-  <button id="tab-set" onclick="goView('set')"><span class="ico">️</span>Ajustes</button>
+  <button id="tab-set" onclick="goView('set')"><span class="ico">⚙️</span>Ajustes</button>
 </nav>
 <div id="gate" class="hidden"></div>
 
@@ -87,8 +88,10 @@ const BIO_CRED_KEY = 'flr_bio_cred';
 
 let me = null, profile = null;
 let view = 'rooms', rooms = [], roomById = {};
-let convMode = null;            // {type:'room', id} | {type:'dm', uid} | {type:'sup', uid}
+let convMode = null;   // {type:'room',id} | {type:'dm',convId,uid} | {type:'sup',uid}
 let liveChannel = null;
+let isSuperAd = false, isMod = false, isChatMod = false;
+let people = [], ownedSet = new Set();
 
 function esc(v){ return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function hh(t){ const d=new Date(t); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
@@ -96,14 +99,7 @@ function bufToB64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf)))
 function b64ToBuf(b64){ const s=atob(b64.replace(/-/g,'+').replace(/_/g,'/')); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i); return u.buffer; }
 function challenge(){ const a=new Uint8Array(32); crypto.getRandomValues(a); return a.buffer; }
 
-/* ─────────── ARRANQUE Y PUERTA DE ENTRADA ─────────── */
-async function init(){
-  const { data:{ session } } = await db.auth.getSession();
-  if (session) return start(session.user);
-  // ¿Biometría registrada? Ofrecer desbloqueo con huella/rostro
-  if (localStorage.getItem(BIO_CRED_KEY)) { showBioGate(); return; }
-  showLoginGate();
-}
+/* ─────────── PUERTA DE ENTRADA (contraseña o biometría) ─────────── */
 async function verifyBiometric(){
   const idB64 = localStorage.getItem(BIO_CRED_KEY); if(!idB64) return false;
   const cred = await navigator.credentials.get({ publicKey:{
@@ -113,7 +109,6 @@ async function verifyBiometric(){
   return !!cred;
 }
 function showBioGate(){
-  let saved=null; try{ saved=JSON.parse(decodeURIComponent(escape(atob(localStorage.getItem('flr_cred')||'')))); }catch(e){}
   const g=document.getElementById('gate'); g.classList.remove('hidden');
   g.innerHTML = `<div class="gcard"><div style="font-size:44px">🔐</div>
     <h2 style="margin:8px 0 4px">Messenger Queendomland</h2>
@@ -152,39 +147,57 @@ async function gateLogin(){
   start(data.user);
 }
 
-/* ─────────── SESIÓN Y VISTAS ─────────── */
+/* ─────────── SESIÓN, ROLES Y VISTAS ─────────── */
 async function start(user){
   me = user;
   const { data: p } = await db.from('profiles').select('*').eq('id', me.id).maybeSingle();
   profile = p;
-  if(!profile){ alert('Completa tu perfil en la casa primero.'); location.href='index.html'; return; }
-  // Modo espejo secreto del super-admin
+  if(!profile){ alert('Completa tu perfil en la casa primero.'); location.href='https://queendomland.com/index.html'; return; }
   if (localStorage.getItem('flr_impersonating')==='1'){
-    const d=document.getElementById('mirror-dot'); d.style.display='inline-block';
-    d.title='Modo espejo activo';
+    const d=document.getElementById('mirror-dot'); d.style.display='inline-block'; d.title='Modo espejo activo';
   }
+  await loadStaffFlags();
   await loadRooms();
   goView('rooms');
   subscribeLive();
   updateBadges();
   setInterval(updateBadges, 30000);
-  // Permiso de notificaciones al primer toque
   document.addEventListener('click', function once(){ askNotif(true); document.removeEventListener('click', once); });
+}
+async function loadStaffFlags(){
+  const [s, m, c, own, ppl] = await Promise.all([
+    db.rpc('is_superadmin'),
+    db.rpc('am_i_moderator'),
+    db.rpc('am_i_chatmod'),
+    db.from('relationships').select('submissive_id').eq('dominant_id', me.id).eq('status','confirmed'),
+    db.from('profiles').select('id, display_name, role, chat_muted').order('display_name').limit(400)
+  ]);
+  isSuperAd = !!s.data; isMod = !!m.data; isChatMod = !!c.data;
+  ownedSet = new Set((own.data||[]).map(r=>r.submissive_id));
+  people = ppl.data || [];
 }
 function goView(v){
   view=v; convMode=null;
+  if(window.__typeCh){ db.removeChannel(window.__typeCh); window.__typeCh=null; }
   document.getElementById('back-btn').classList.add('hidden');
   document.querySelectorAll('#tabbar button').forEach(b=>b.classList.remove('on'));
-  document.getElementById('tab-'+(v==='set'?'set':v==='dms'?'dms':'rooms')).classList.add('on');
+  document.getElementById('tab-'+v).classList.add('on');
   if(v==='rooms') renderRooms();
   if(v==='dms') renderDMs();
   if(v==='set') renderSettings();
 }
-function askNotif(silent){
+function closeConv(){
+  if(window.__typeCh){ db.removeChannel(window.__typeCh); window.__typeCh=null; }
+  if(view==='rooms') renderRooms(); else if(view==='dms') renderDMs(); else renderSettings();
+  document.getElementById('back-btn').classList.add('hidden');
+  document.querySelectorAll('#tabbar button').forEach(b=>b.classList.remove('on'));
+  document.getElementById('tab-'+view).classList.add('on');
+  convMode=null;
+}
+function askNotif(){
   if(!('Notification' in window)) return;
-  if(Notification.permission==='granted'){ setBell(); return; }
-  if(Notification.permission==='denied'){ setBell(); return; }
-  Notification.requestPermission().then(setBell);
+  if(Notification.permission==='default') Notification.requestPermission().then(setBell);
+  else setBell();
 }
 function setBell(){
   const b=document.getElementById('bell-btn');
@@ -192,11 +205,11 @@ function setBell(){
 }
 
 /* ─────────── CHAT: SALAS ─────────── */
+async function isSuper(){ const { data } = await db.rpc('is_superadmin'); return !!data; }
 async function loadRooms(){
   const { data } = await db.from('chat_rooms').select('*').order('is_default',{ascending:false}).order('created_at');
   rooms = data || []; roomById={};
   rooms.forEach(r=>roomById[r.id]=r);
-  // Filtrar privadas: solo miembros o super-admin
   if(!await isSuper()){
     const priv = rooms.filter(r=>r.is_private);
     if(priv.length){
@@ -207,14 +220,12 @@ async function loadRooms(){
     }
   }
 }
-async function isSuper(){ const { data } = await db.rpc('is_superadmin'); return !!data; }
 function renderRooms(){
   const s=document.getElementById('screen');
   s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
       <b style="color:var(--gold-light);font-size:16px"># Salas de la casa</b>
       <span class="small" style="color:#a1a1aa;margin-left:auto">${rooms.length}</span></div>` +
     (rooms.map(r=>{
-      const last = localStorage.getItem('msgr_room_'+r.id)||'0';
       const newMark = (Number(sessionStorage.getItem('msgr_new_'+r.id)||0) > 0);
       return `<div class="rowitem" onclick="openRoom('${r.id}')">
         <div class="ava">${r.is_private?'🔒':'#'}</div>
@@ -224,9 +235,8 @@ function renderRooms(){
 }
 async function openRoom(id){
   const room = roomById[id]; if(!room) return;
-  // Bans y mordazas de sala
   const { data: ban } = await db.from('chat_room_bans').select('*').eq('room_id',id).eq('user_id',me.id).maybeSingle();
-  const { data: mute } = await db.from('chat_room_mutes').select('*').eq('room_id',id).eq('user_id',me.id).maybeSingle();
+  const { data: mute } = await db.from('chat_room_mutes').select('user_id').eq('room_id',id).eq('user_id',me.id).maybeSingle();
   convMode={type:'room', id, ban:!!ban, mute:!!mute};
   sessionStorage.removeItem('msgr_new_'+id);
   localStorage.setItem('msgr_room_'+id, String(Date.now()));
@@ -234,14 +244,23 @@ async function openRoom(id){
   document.querySelectorAll('#tabbar button').forEach(b=>b.classList.remove('on'));
   const s=document.getElementById('screen');
   s.innerHTML = `<div id="conv">
-    <div id="conv-head"><b>${room.is_private?'🔒':'#'} ${esc(room.name)}</b></div>
+    <div id="conv-head"><b>${room.is_private?'🔒':'#'} ${esc(room.name)}</b>
+      <span id="typing-lbl" class="small" style="color:#4ade80;flex:none;"></span>
+      <button class="ibtn" onclick="openMembersModal()">👥</button></div>
     <div id="conv-msgs"><p class="empty">Cargando…</p></div>
     <div id="conv-input">
-      <input id="msg-in" placeholder="${ban?'🚫 Expulsado de esta sala':mute?'🔇 Silenciado en esta sala':'Escribe y pulsa Enviar…'}" ${(ban||mute)?'disabled':''}/>
+      <button class="ibtn" onclick="openEmojiPicker('msg-in')">😀</button>
+      <input type="file" id="room-file" style="display:none" accept="image/*,video/*" onchange="pickRoomFile(this)"/>
+      <button class="ibtn" onclick="document.getElementById('room-file').click()">📎</button>
+      <input id="msg-in" placeholder="${ban?'🚫 Expulsado de esta sala':mute?'🔇 Silenciado en esta sala':'Escribe y pulsa Enviar…'}" ${(ban||mute)?'disabled':''} oninput="sendTyping()"/>
       <button onclick="sendRoomMsg()" ${(ban||mute)?'disabled':''}>➤</button>
-    </div></div>`;
+    </div>
+    <div id="room-file-chip" class="small" style="padding:0 4px 6px;"></div></div>`;
   const inp=document.getElementById('msg-in');
   if(inp) inp.addEventListener('keydown', e=>{ if(e.key==='Enter') sendRoomMsg(); });
+  if(window.__typeCh) db.removeChannel(window.__typeCh);
+  window.__typeCh = db.channel('msgr-typing-'+id);
+  window.__typeCh.on('broadcast', { event:'typing' }, p => showTyping(p.payload?.name||'')).subscribe();
   loadRoomMsgs(id);
 }
 async function loadRoomMsgs(id){
@@ -257,115 +276,87 @@ async function sendRoomMsg(){
   if(!body || !convMode || convMode.type!=='room') return;
   if(convMode.ban) return alert('🚫 Tu acceso a esta sala está prohibido.');
   if(convMode.mute) return alert('🔇 Estás silenciado en esta sala.');
-  const { data: pm } = await db.from('profiles').select('chat_muted').eq('id',me.id).maybeSingle();
+  const pm = people.find(x=>x.id===me.id);
   if(pm && pm.chat_muted) return alert('🔇 El Staff te ha silenciado.');
   const { data: rel } = await db.from('relationships').select('is_muzzled').eq('submissive_id',me.id).eq('status','confirmed').maybeSingle();
   if(rel && rel.is_muzzled) return alert('🔇 Estás amordazado por tu Dominante.');
   const { error } = await db.from('chat_messages').insert({ user_id: me.id, body, room_id: convMode.id });
   if(error) return alert(error.message);
   inp.value='';
+  await sendRoomAttachment();
+}
+function pickRoomFile(input){
+  window.__pendRoom = input.files[0]||null;
+  const c=document.getElementById('room-file-chip');
+  if(c) c.textContent = window.__pendRoom ? '📎 '+window.__pendRoom.name : '';
+}
+async function sendRoomAttachment(){
+  const file=window.__pendRoom; if(!file) return;
+  const path=me.id+'/'+Date.now()+'_'+file.name.replace(/[^a-zA-Z0-9.\-_]/g,'');
+  const { error:up } = await db.storage.from('chat-media').upload(path,file);
+  if(up) return alert(up.message);
+  const url=db.storage.from('chat-media').getPublicUrl(path).data.publicUrl;
+  const { error:pe } = await db.from('chat_media_pending').insert({ user_id: me.id, url, type: file.type.startsWith('video')?'video':'image' });
+  if(pe) return alert(pe.message);
+  alert('📎 Archivo enviado a revisión. Se publicará cuando el Staff lo apruebe.');
+  window.__pendRoom=null;
+  const c=document.getElementById('room-file-chip'); if(c) c.textContent='';
 }
 
-/* ─────────── MENSAJES PRIVADOS ─────────── */
-async function renderDMs(){
-  const s=document.getElementById('screen');
-  s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-      <b style="color:var(--gold-light);font-size:16px">💬 Mensajes privados</b>
-      <button class="tbtn" style="margin-left:auto;background:transparent!important;border:1px solid rgba(201,162,75,.4)!important;color:var(--gold-light)!important;border-radius:999px;padding:5px 10px!important;font-size:12px" onclick="newDM()">＋ Nuevo</button></div>
-    <div id="dm-list"><p class="empty">Cargando…</p></div>`;
-  const { data } = await db.from('direct_messages')
-    .select('id, sender_id, recipient_id, body, created_at, read')
-    .or(`sender_id.eq.${me.id},recipient_id.eq.${me.id}`)
-    .order('created_at',{ascending:false}).limit(400);
-  const threads={};
-  (data||[]).forEach(m=>{
-    const other = m.sender_id===me.id ? m.recipient_id : m.sender_id;
-    if(!threads[other]) threads[other]={ uid:other, last:m, unread:0 };
-    if(m.recipient_id===me.id && !m.read) threads[other].unread++;
-  });
-  const list=Object.values(threads).sort((a,b)=> new Date(b.last.created_at)-new Date(a.last.created_at));
-  if(!list.length){ document.getElementById('dm-list').innerHTML='<p class="empty">Aún no tienes conversaciones.</p>'; return; }
-  const ids=list.map(t=>t.uid);
-  const { data: profs } = await db.from('profiles').select('id, display_name, role, avatar_url').in('id', ids);
-  const pm={}; (profs||[]).forEach(p=>pm[p.id]=p);
-  document.getElementById('dm-list').innerHTML = list.map(t=>{
-    const p=pm[t.uid]||{};
-    return `<div class="rowitem" onclick="openThread('${t.uid}')">
-      ${p.avatar_url?`<img class="ava" src="${esc(p.avatar_url)}"/>`:`<div class="ava">${p.role==='dominant'?'♛':'⛓'}</div>`}
-      <div class="meta"><b>${esc(p.display_name||'Miembro')}</b><span>${esc((t.last.body||'').slice(0,60))}</span></div>
-      ${t.unread?`<span class="dotnew"></span>`:''}</div>`;
-  }).join('');
+/* ─────────── "ESCRIBIENDO…" EN VIVO ─────────── */
+let lastTypingSent=0, typingTimer=null;
+function sendTyping(){
+  const now=Date.now(); if(now-lastTypingSent<1500) return; lastTypingSent=now;
+  if(window.__typeCh) window.__typeCh.send({ type:'broadcast', event:'typing', payload:{ name: profile?.display_name||'Alguien' } });
 }
-async function newDM(){
-  const { data } = await db.from('profiles').select('id, display_name, role').order('display_name').limit(300);
-  const s=document.getElementById('screen');
-  s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-      <button class="tbtn" onclick="goView('dms')">←</button><b style="color:var(--gold-light)">＋ Nueva conversación</b></div>
-    <input id="dm-q" placeholder="Buscar miembro…" oninput="filterNewDM()"/>
-    <div id="dm-pick"></div>`;
-  window.__pickList = data||[];
-  filterNewDM();
+function showTyping(name){
+  const lbl=document.getElementById('typing-lbl'); if(!lbl) return;
+  lbl.textContent = name+' está escribiendo…';
+  clearTimeout(typingTimer); typingTimer=setTimeout(()=>{ lbl.textContent=''; },2200);
 }
-function filterNewDM(){
-  const q=(document.getElementById('dm-q').value||'').toLowerCase();
-  const list=(window.__pickList||[]).filter(p=>p.id!==me.id && (p.display_name||'').toLowerCase().includes(q)).slice(0,40);
-  document.getElementById('dm-pick').innerHTML = list.map(p=>
-    `<div class="rowitem" onclick="openThread('${p.id}')"><div class="ava">${p.role==='dominant'?'♛':'⛓'}</div>
-     <div class="meta"><b>${esc(p.display_name)}</b></div></div>`).join('') || '<p class="empty">Sin coincidencias.</p>';
+
+/* ─────────── EMOJIS ─────────── */
+const EMOJIS=['😀','😂','😍','😘','😎','🥰','','😡','','👍','👎','🙏','💪','❤️','💛','💜','🖤','','👑','✨','🤍','','🐕','','🔥',''];
+function openEmojiPicker(inputId){
+  const old=document.getElementById('emo-pop'); if(old){ old.remove(); return; }
+  const pop=document.createElement('div'); pop.id='emo-pop';
+  pop.style.cssText='position:fixed;bottom:74px;left:10px;right:10px;max-width:420px;margin:0 auto;background:#131014;border:1px solid rgba(201,162,75,.5);border-radius:14px;padding:10px;display:grid;grid-template-columns:repeat(7,1fr);gap:4px;z-index:9999;max-height:220px;overflow-y:auto;';
+  pop.innerHTML=EMOJIS.map(e=>`<button style="background:transparent;border:none;font-size:22px;cursor:pointer;padding:4px;" onclick="insEmo('${inputId}','${e}')">${e}</button>`).join('');
+  document.body.appendChild(pop);
+  setTimeout(()=>document.addEventListener('click', function h(ev){ if(!pop.contains(ev.target)){ pop.remove(); document.removeEventListener('click',h); } }),0);
 }
-async function openThread(uid, supMode){
-  convMode = supMode ? {type:'sup', uid} : {type:'dm', uid};
-  document.getElementById('back-btn').classList.remove('hidden');
-  document.querySelectorAll('#tabbar button').forEach(b=>b.classList.remove('on'));
-  const s=document.getElementById('screen');
-  let head='', banner='';
-  if(supMode){
-    const { data: p } = await db.from('profiles').select('display_name').eq('id',uid).maybeSingle();
-    head = `👁 ${esc(p?.display_name||'')} <span class="small">(supervisión)</span>`;
-    banner = `<div class="sup-banner">👁 Supervisión de Dueña: solo lectura. Los mensajes privados de un sumiso con autonomía quedan fuera de tu vista.</div>`;
-  } else {
-    const { data: p } = await db.from('profiles').select('display_name, avatar_url').eq('id',uid).maybeSingle();
-    head = esc(p?.display_name||'Miembro');
-  }
-  s.innerHTML = `<div id="conv">
-    <div id="conv-head"><b>${head}</b></div>
-    ${banner}
-    <div id="conv-msgs"><p class="empty">Cargando…</p></div>
-    ${supMode?'':`<div id="conv-input">
-      <input id="msg-in" placeholder="Mensaje privado…"/>
-      <button onclick="sendDM()">➤</button></div>`}
+function insEmo(inputId,e){ const i=document.getElementById(inputId); if(i){ i.value+=e; i.focus(); } }
+
+/* ─────────── SILENCIOS DE STAFF (política de la casa) ─────────── */
+function openMembersModal(){
+  const list=(people||[]).filter(p=>p.id!==me.id);
+  const ov=document.createElement('div'); ov.id='members-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:99993;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML=`<div style="background:#131014;border:1px solid rgba(201,162,75,.5);border-radius:16px;padding:18px;max-width:480px;width:100%;max-height:72vh;overflow-y:auto;">
+    <h3 style="margin:0 0 8px;">👥 Miembros y silencios</h3>
+    <p class="small">Política de la casa: Admin silencia a cualquier sumiso; Moderadoras y Perros Guardianes solo a sumisos sin Dueña propia.</p>
+    ${list.map(p=>{
+      const can=p.role==='submissive' && (isSuperAd || ((isMod||isChatMod) && !ownedSet.has(p.id)));
+      return `<div style="display:flex;gap:8px;align-items:center;margin:6px 0;">
+        <span class="small" style="flex:1;">${p.role==='dominant'?'♛':'⛓'} <b>${esc(p.display_name)}</b>${p.chat_muted?' 🔇':''}</span>
+        ${can?`<button class="ibtn" onclick="staffMute('${p.id}',${!p.chat_muted})">${p.chat_muted?'🔊 Devolver voz':'🔇 Silenciar'}</button>`:''}
+      </div>`;
+    }).join('')}
+    <p style="text-align:center;margin-top:12px;"><button class="ibtn" onclick="document.getElementById('members-ov').remove()">Cerrar</button></p>
   </div>`;
-  const inp=document.getElementById('msg-in');
-  if(inp) inp.addEventListener('keydown', e=>{ if(e.key==='Enter') sendDM(); });
-  if(supMode) loadSupMsgs(uid); else loadThreadMsgs(uid);
+  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
+  document.body.appendChild(ov);
 }
-async function loadThreadMsgs(uid){
-  const { data } = await db.from('direct_messages')
-    .select('*').or(`and(sender_id.eq.${me.id},recipient_id.eq.${uid}),and(sender_id.eq.${uid},recipient_id.eq.${me.id})`)
-    .order('created_at',{ascending:true}).limit(300);
-  const box=document.getElementById('conv-msgs'); if(!box) return;
-  box.innerHTML=(data||[]).map(m=>bubble(m, m.sender_id===me.id)).join('') || '<p class="empty">Escribe el primer mensaje.</p>';
-  box.scrollTop=box.scrollHeight;
-  // Marcar como leídos
-  await db.from('direct_messages').update({ read:true })
-    .eq('recipient_id', me.id).eq('sender_id', uid).eq('read', false);
-  updateBadges();
-}
-async function sendDM(){
-  const inp=document.getElementById('msg-in'); const body=inp.value.trim();
-  if(!body || !convMode || convMode.type!=='dm') return;
-  const { error } = await db.from('direct_messages').insert({ sender_id: me.id, recipient_id: convMode.uid, body, read:false });
+async function staffMute(id,on){
+  const myRole=isSuperAd?'admin':(isMod?'moderator':'chatmod');
+  const { error } = await db.from('profiles').update({ chat_muted:on, chat_muted_by:me.id, chat_muted_by_role:myRole }).eq('id',id);
   if(error) return alert(error.message);
-  inp.value=''; loadThreadMsgs(convMode.uid);
+  const p=(people||[]).find(x=>x.id===id); if(p) p.chat_muted=on;
+  document.getElementById('members-ov')?.remove();
+  openMembersModal();
 }
-async function loadSupMsgs(uid){
-  const { data, error } = await db.rpc('dom_view_sub_messages', { p_sub_id: uid });
-  const box=document.getElementById('conv-msgs'); if(!box) return;
-  if(error){ box.innerHTML='<p class="empty">No autorizado: '+esc(error.message)+'</p>'; return; }
-  if(!data || !data.length){ box.innerHTML='<p class="empty">Sin mensajes privados que supervisar.</p>'; return; }
-  box.innerHTML = data.slice().reverse().map(m=>bubble(m, m.sender_id===uid, m.sender_id===uid?'⛓ envía':'⛓ recibe')).join('');
-  box.scrollTop=box.scrollHeight;
-}
+
+/* ─────────── BURBUJAS ─────────── */
 function bubble(m, mine, whoLabel){
   let att='';
   if(m.attachment_url){
@@ -378,18 +369,175 @@ function bubble(m, mine, whoLabel){
     ${esc(m.body||'')}${att}
     <span class="tm">${hh(m.created_at)}</span></div>`;
 }
-function closeConv(){
-  if(view==='rooms') renderRooms(); else if(view==='dms') renderDMs(); else renderSettings();
-  document.getElementById('back-btn').classList.add('hidden');
+
+/* ═══════════════ PARTE 2: PEGA AQUÍ DEBAJO EL SIGUIENTE BLOQUE ═══════════════ */
+  /* ─────────── MENSAJES PRIVADOS (conversations + private_messages) ─────────── */
+async function renderDMs(){
+  const s=document.getElementById('screen');
+  s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+      <b style="color:var(--gold-light);font-size:16px">💬 Mensajes privados</b>
+      <button class="ibtn" style="margin-left:auto" onclick="window.__showArchived=!window.__showArchived;renderDMs()">🗄 ${window.__showArchived?'Activos':'Archivados'}</button>
+      <button class="ibtn" onclick="newDM()">＋ Nuevo</button></div>
+    <div id="dm-list"><p class="empty">Cargando…</p></div>`;
+  const { data: convs } = await db.from('conversations')
+    .select('id, member_a, member_b, archived_a, archived_b, deleted_a, deleted_b')
+    .or(`member_a.eq.${me.id},member_b.eq.${me.id}`);
+  let list=(convs||[]).map(c=>{
+    const iAmA = c.member_a===me.id;
+    return { conv:c, other: iAmA?c.member_b:c.member_a,
+             archived: iAmA?c.archived_a:c.archived_b,
+             deleted:  iAmA?c.deleted_a:c.deleted_b };
+  }).filter(x=>!x.deleted);
+  list = list.filter(x=> (!!x.archived) === (!!window.__showArchived));
+  if(!list.length){
+    document.getElementById('dm-list').innerHTML =
+      `<p class="empty">${window.__showArchived?'No tienes conversaciones archivadas.':'Aún no tienes conversaciones.'}</p>`;
+    return;
+  }
+  const convIds=list.map(x=>x.conv.id);
+  const { data: msgs } = await db.from('private_messages')
+    .select('conversation_id, sender_id, body, attachment_type, read, created_at')
+    .in('conversation_id', convIds).order('created_at',{ascending:false}).limit(800);
+  const byConv={};
+  (msgs||[]).forEach(m=>{
+    if(!byConv[m.conversation_id]) byConv[m.conversation_id]={ last:m, unread:0 };
+    if(m.sender_id!==me.id && !m.read) byConv[m.conversation_id].unread++;
+  });
+  const { data: profs } = await db.from('profiles')
+    .select('id, display_name, role, avatar_url').in('id', list.map(x=>x.other));
+  const pm={}; (profs||[]).forEach(p=>pm[p.id]=p);
+  list.sort((a,b)=> new Date(byConv[b.conv.id]?.last?.created_at||0) - new Date(byConv[a.conv.id]?.last?.created_at||0));
+  document.getElementById('dm-list').innerHTML = list.map(x=>{
+    const p=pm[x.other]||{};
+    const info=byConv[x.conv.id];
+    const prev=info?.last ? (info.last.body || '['+(info.last.attachment_type||'adjunto')+']') : 'Sin mensajes aún';
+    return `<div class="rowitem" onclick="openThread('${x.conv.id}','${x.other}')">
+      ${p.avatar_url?`<img class="ava" src="${esc(p.avatar_url)}"/>`:`<div class="ava">${p.role==='dominant'?'♛':'⛓'}</div>`}
+      <div class="meta"><b>${esc(p.display_name||'Miembro')}</b><span>${esc(String(prev).slice(0,60))}</span></div>
+      ${info?.unread?`<span class="dotnew"></span>`:''}
+      <button class="ibtn" onclick="event.stopPropagation();setThreadArchived('${x.conv.id}',${!window.__showArchived})">${window.__showArchived?'↩':''}</button></div>`;
+  }).join('');
+}
+async function setThreadArchived(convId, archived){
+  const { data: c } = await db.from('conversations').select('member_a').eq('id', convId).maybeSingle();
+  if(!c) return;
+  const col = (c.member_a===me.id) ? 'archived_a' : 'archived_b';
+  const { error } = await db.from('conversations').update({ [col]: archived }).eq('id', convId);
+  if(error) return alert(error.message);
+  renderDMs();
+}
+async function newDM(){
+  const { data } = await db.from('profiles').select('id, display_name, role').order('display_name').limit(300);
+  const s=document.getElementById('screen');
+  s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+      <button class="ibtn" onclick="goView('dms')">←</button><b style="color:var(--gold-light)">＋ Nueva conversación</b></div>
+    <input id="dm-q" placeholder="Buscar miembro…" oninput="filterNewDM()"/>
+    <div id="dm-pick"></div>`;
+  window.__pickList = data||[];
+  filterNewDM();
+}
+function filterNewDM(){
+  const q=(document.getElementById('dm-q').value||'').toLowerCase();
+  const list=(window.__pickList||[]).filter(p=>p.id!==me.id && (p.display_name||'').toLowerCase().includes(q)).slice(0,40);
+  document.getElementById('dm-pick').innerHTML = list.map(p=>
+    `<div class="rowitem" onclick="openThreadWith('${p.id}')"><div class="ava">${p.role==='dominant'?'♛':''}</div>
+     <div class="meta"><b>${esc(p.display_name)}</b></div></div>`).join('') || '<p class="empty">Sin coincidencias.</p>';
+}
+async function openThreadWith(otherId){
+  const { data: existing } = await db.from('conversations').select('id')
+    .or(`and(member_a.eq.${me.id},member_b.eq.${otherId}),and(member_a.eq.${otherId},member_b.eq.${me.id})`)
+    .maybeSingle();
+  let convId = existing?.id;
+  if(!convId){
+    const { data: created, error } = await db.from('conversations').insert({
+      member_a: me.id, member_b: otherId, initiated_by: me.id, status: 'active',
+      archived_a: false, archived_b: false, deleted_a: false, deleted_b: false
+    }).select('id').single();
+    if(error) return alert(error.message);
+    convId = created.id;
+  }
+  openThread(convId, otherId);
+}
+async function openThread(convId, otherUid, supMode){
+  convMode = supMode ? {type:'sup', uid:otherUid} : {type:'dm', convId, uid:otherUid};
+  document.getElementById('back-btn').classList.remove('hidden');
   document.querySelectorAll('#tabbar button').forEach(b=>b.classList.remove('on'));
-  document.getElementById('tab-'+(view==='set'?'set':view)).classList.add('on');
-  convMode=null;
+  const s=document.getElementById('screen');
+  let head='', banner='';
+  if(supMode){
+    const { data: p } = await db.from('profiles').select('display_name').eq('id',otherUid).maybeSingle();
+    head = `👁 ${esc(p?.display_name||'')} <span class="small">(supervisión)</span>`;
+    banner = `<div class="sup-banner">👁 Supervisión de Dueña: solo lectura. Los mensajes privados de un sumiso con autonomía quedan fuera de tu vista.</div>`;
+  } else {
+    const { data: p } = await db.from('profiles').select('display_name, avatar_url').eq('id',otherUid).maybeSingle();
+    head = esc(p?.display_name||'Miembro');
+  }
+  s.innerHTML = `<div id="conv">
+    <div id="conv-head"><b>${head}</b></div>
+    ${banner}
+    <div id="conv-msgs"><p class="empty">Cargando…</p></div>
+    ${supMode?'':`<div id="conv-input">
+      <button class="ibtn" onclick="openEmojiPicker('msg-in')">😀</button>
+      <input type="file" id="dm-file" style="display:none" accept="image/*,video/*,application/pdf" onchange="pickDMFile(this)"/>
+      <button class="ibtn" onclick="document.getElementById('dm-file').click()">📎</button>
+      <input id="msg-in" placeholder="Mensaje privado…"/>
+      <button onclick="sendDM()">➤</button></div>
+    <div id="dm-file-chip" class="small" style="padding:0 4px 6px;"></div>`}
+  </div>`;
+  const inp=document.getElementById('msg-in');
+  if(inp) inp.addEventListener('keydown', e=>{ if(e.key==='Enter') sendDM(); });
+  if(supMode) loadSupMsgs(otherUid); else loadThreadMsgs(convId);
+}
+async function loadThreadMsgs(convId){
+  const { data } = await db.from('private_messages')
+    .select('*').eq('conversation_id', convId)
+    .order('created_at',{ascending:true}).limit(300);
+  const box=document.getElementById('conv-msgs'); if(!box) return;
+  box.innerHTML=(data||[]).map(m=>bubble(m, m.sender_id===me.id)).join('') || '<p class="empty">Escribe el primer mensaje.</p>';
+  box.scrollTop=box.scrollHeight;
+  if(convMode && convMode.uid){
+    await db.from('private_messages').update({ read:true })
+      .eq('conversation_id', convId).eq('sender_id', convMode.uid).eq('read', false);
+  }
+  updateBadges();
+}
+function pickDMFile(input){
+  window.__pendDM = input.files[0]||null;
+  const c=document.getElementById('dm-file-chip');
+  if(c) c.textContent = window.__pendDM ? '📎 '+window.__pendDM.name : '';
+}
+async function sendDM(){
+  const inp=document.getElementById('msg-in'); const body=inp.value.trim();
+  const file=window.__pendDM;
+  if((!body && !file) || !convMode || convMode.type!=='dm') return;
+  let url=null, type=null;
+  if(file){
+    const path=me.id+'/'+Date.now()+'_'+file.name.replace(/[^a-zA-Z0-9.\-_]/g,'');
+    const { error:up } = await db.storage.from('privados').upload(path, file);
+    if(up) return alert(up.message);
+    url=db.storage.from('privados').getPublicUrl(path).data.publicUrl;
+    type=file.type.startsWith('image')?'image':file.type.startsWith('video')?'video':'file';
+  }
+  const { error } = await db.from('private_messages').insert({
+    conversation_id: convMode.convId, sender_id: me.id, body,
+    attachment_url:url, attachment_type:type, read:false });
+  if(error) return alert(error.message);
+  window.__pendDM=null;
+  const chip=document.getElementById('dm-file-chip'); if(chip) chip.textContent='';
+  inp.value=''; loadThreadMsgs(convMode.convId);
+}
+async function loadSupMsgs(uid){
+  const { data, error } = await db.rpc('dom_view_sub_messages', { p_sub_id: uid });
+  const box=document.getElementById('conv-msgs'); if(!box) return;
+  if(error){ box.innerHTML='<p class="empty">No autorizado: '+esc(error.message)+'</p>'; return; }
+  if(!data || !data.length){ box.innerHTML='<p class="empty">Sin mensajes privados que supervisar.</p>'; return; }
+  box.innerHTML = data.slice().reverse().map(m=>bubble(m, m.sender_id===uid, m.sender_id===uid?'⛓ envía':'⛓ recibe')).join('');
+  box.scrollTop=box.scrollHeight;
 }
 
 /* ─────────── AJUSTES, SUPERVISIÓN Y MODO ESPEJO ─────────── */
 async function renderSettings(){
   const s=document.getElementById('screen');
-  const superAd = await isSuper();
   const domVer = profile.role==='dominant' && profile.dom_verified;
   let html = `<b style="color:var(--gold-light);font-size:16px">⚙️ Ajustes</b>
   <div class="rowitem" onclick="askNotif()"><div class="ava">🔔</div><div class="meta"><b>Notificaciones</b><span>${('Notification' in window && Notification.permission==='granted')?'Activadas':'Toca para activar'}</span></div></div>
@@ -397,7 +545,7 @@ async function renderSettings(){
   if(domVer){
     html += `<div class="rowitem" onclick="openSupervision()"><div class="ava">👁</div><div class="meta"><b>Supervisión de sumisos</b><span>Mensajes privados de sumisos sin autonomía (solo lectura)</span></div></div>`;
   }
-  if(superAd){
+  if(isSuperAd){
     html += `<div class="rowitem" onclick="openMirror()"><div class="ava" style="border-color:#7c3aed;color:#c4b5fd">👁</div><div class="meta"><b style="color:#c4b5fd">Llaves del reino</b><span>Modo espejo secreto (super-admin)</span></div></div>`;
   }
   if(localStorage.getItem('flr_impersonating')==='1'){
@@ -405,7 +553,7 @@ async function renderSettings(){
   }
   html += `<div class="rowitem" onclick="location.href='https://queendomland.com/index.html'"><div class="ava">🏛</div><div class="meta"><b>Ir a la casa</b><span>Queendomland completa</span></div></div>
   <div class="rowitem" onclick="logout()"><div class="ava">🚪</div><div class="meta"><b>Cerrar sesión</b><span>Sal de Messenger</span></div></div>
-  <p class="empty">Messenger Queendomland · v1 · Contenido simbólico y consensuado entre adultos.</p>`;
+  <p class="empty">Messenger Queendomland · v2 · Contenido simbólico y consensuado entre adultos.</p>`;
   s.innerHTML = html;
 }
 async function enrollBio(){
@@ -432,9 +580,9 @@ async function openSupervision(){
   const s=document.getElementById('screen');
   const list=(subs||[]).filter(x=>x.profiles && !x.profiles.autonomy);
   s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-    <button class="tbtn" onclick="renderSettings()">←</button><b style="color:var(--gold-light)">👁 Supervisión</b></div>
+    <button class="ibtn" onclick="renderSettings()">←</button><b style="color:var(--gold-light)">👁 Supervisión</b></div>
     <div class="sup-banner">Solo sumisos <b>sin autonomía</b>. Con autonomía, sus privados son suyos.</div>` +
-    (list.map(x=>`<div class="rowitem" onclick="openThread('${x.profiles.id}', true)">
+    (list.map(x=>`<div class="rowitem" onclick="openThread(null,'${x.profiles.id}',true)">
       ${x.profiles.avatar_url?`<img class="ava" src="${esc(x.profiles.avatar_url)}"/>`:`<div class="ava">⛓</div>`}
       <div class="meta"><b>${esc(x.profiles.display_name)}</b><span>Ver mensajes privados (solo lectura)</span></div></div>`).join('')
      || '<p class="empty">No tienes sumisos sin autonomía.</p>');
@@ -444,7 +592,7 @@ async function openMirror(){
   const s=document.getElementById('screen');
   const list=(data||[]).sort((a,b)=> (a.display_name||'').localeCompare(b.display_name||'','es',{sensitivity:'base'}));
   s.innerHTML = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
-    <button class="tbtn" onclick="renderSettings()">←</button><b style="color:#c4b5fd">👁 Llaves del reino</b></div>
+    <button class="ibtn" onclick="renderSettings()">←</button><b style="color:#c4b5fd">👁 Llaves del reino</b></div>
     <div class="sup-banner" style="background:rgba(124,58,237,.12);border-color:rgba(124,58,237,.5)">Secreto: el miembro nunca lo nota. Queda registro en tu auditoría privada.</div>
     <input id="mir-q" placeholder="Buscar miembro…" oninput="filterMirror()"/>
     <div id="mir-list"></div>`;
@@ -455,7 +603,7 @@ function filterMirror(){
   const list=(window.__mirList||[]).filter(u=>(u.display_name||'').toLowerCase().includes(q)).slice(0,40);
   document.getElementById('mir-list').innerHTML = list.map(u=>
     `<div class="rowitem" onclick="mirrorEnter('${u.user_id}','${esc(u.email)}')">
-      <div class="ava" style="border-color:#7c3aed;color:#c4b5fd">${u.role==='dominant'?'♛':''}</div>
+      <div class="ava" style="border-color:#7c3aed;color:#c4b5fd">${u.role==='dominant'?'♛':'⛓'}</div>
       <div class="meta"><b>${esc(u.display_name)}</b><span>${esc(u.email)}</span></div>
       <span class="small" style="color:#c4b5fd">Entrar →</span></div>`).join('') || '<p class="empty">Sin coincidencias.</p>';
 }
@@ -491,7 +639,7 @@ async function logout(){
   location.reload();
 }
 
-/* ─────────── TIEMPO REAL Y NOTIFICACIONES ─────────── */
+/* ─────────── TIEMPO REAL, NOTIFICACIONES Y BADGES ─────────── */
 function subscribeLive(){
   if(liveChannel) db.removeChannel(liveChannel);
   liveChannel = db.channel('msgr-live')
@@ -504,11 +652,11 @@ function subscribeLive(){
       notify('💬 '+(roomById[m.room_id]?.name||'Chat'), m.body||'');
       if(view==='rooms') renderRooms();
     })
-    .on('postgres_changes', { event:'INSERT', schema:'public', table:'direct_messages' }, p => {
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'private_messages' }, p => {
       const m=p.new;
-      if(m.recipient_id!==me.id) return;
-      const open = convMode && convMode.type==='dm' && convMode.uid===m.sender_id && !document.hidden;
-      if(open){ loadThreadMsgs(m.sender_id); return; }
+      if(m.sender_id===me.id) return;
+      const open = convMode && convMode.type==='dm' && convMode.convId===m.conversation_id;
+      if(open && !document.hidden){ loadThreadMsgs(m.conversation_id); return; }
       notify('💬 Mensaje privado', m.body||'');
       updateBadges();
       if(view==='dms') renderDMs();
@@ -522,14 +670,30 @@ function notify(title, body){
 }
 async function updateBadges(){
   if(!me) return;
-  const { count } = await db.from('direct_messages')
-    .select('*', { count:'exact', head:true }).eq('recipient_id', me.id).eq('read', false);
+  const { data: convs } = await db.from('conversations')
+    .select('id, member_a, deleted_a, deleted_b')
+    .or(`member_a.eq.${me.id},member_b.eq.${me.id}`);
+  const list=(convs||[]).filter(c=> !(c.member_a===me.id ? c.deleted_a : c.deleted_b));
+  let count=0;
+  if(list.length){
+    const { data: msgs } = await db.from('private_messages')
+      .select('sender_id, read').in('conversation_id', list.map(c=>c.id)).eq('read', false);
+    count=(msgs||[]).filter(m=>m.sender_id!==me.id).length;
+  }
   const b=document.getElementById('bdg-dms');
   if(count>0){ b.style.display='inline'; b.textContent=count>99?'99+':count; } else b.style.display='none';
 }
+
+/* ─────────── ARRANQUE ─────────── */
+async function init(){
+  const { data:{ session } } = await db.auth.getSession();
+  if (session) return start(session.user);
+  if (localStorage.getItem(BIO_CRED_KEY)) { showBioGate(); return; }
+  showLoginGate();
+}
 init();
 </script>
-  <script>
+<script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 }
