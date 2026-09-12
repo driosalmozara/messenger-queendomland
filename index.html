@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <title>Messenger Queendomland</title>
 <link rel="manifest" href="./manifest.json"/><meta name="theme-color" content="#0d0c0a"/>
-<link rel="apple-touch-icon" href="corona.png"/>
+<link rel="apple-touch-icon" href="corona-chat.png"/>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="trono-de-oro.css">
 <script src="toasts.js" defer></script>
@@ -310,7 +310,7 @@ async function loadRoomMsgs(id){
     .order('created_at',{ascending:false}).limit(120);
   const list=(data||[]).reverse();
   const box=document.getElementById('conv-msgs'); if(!box) return;
-  box.innerHTML = list.map(m=>bubble(m, m.user_id===me.id, m.display_name)).join('') || '<p class="empty">Sé la primera voz de esta sala.</p>';
+  box.innerHTML = list.map(m=>bubble(m, m.user_id===me.id, m.display_name, m.id, m.user_id===me.id)).join('') || '<p class="empty">Sé la primera voz de esta sala.</p>';
   box.scrollTop=box.scrollHeight;
 }
 async function sendRoomMsg(){
@@ -345,6 +345,12 @@ async function sendRoomAttachment(){
   const c=document.getElementById('room-file-chip'); if(c) c.textContent='';
 }
 
+  async function deleteRoomMsg(id){
+  if(!confirm('¿Eliminar este mensaje para todos?')) return;
+  const { error } = await db.from('chat_messages').delete().eq('id', id).eq('user_id', me.id);
+  if(error) return alert(error.message);
+  if(convMode && convMode.type==='room') loadRoomMsgs(convMode.id);
+}
 /* ─────────── "ESCRIBIENDO…" EN VIVO ─────────── */
 let lastTypingSent=0, typingTimer=null;
 function sendTyping(){
@@ -399,7 +405,7 @@ async function staffMute(id,on){
 }
 
 /* ─────────── BURBUJAS ─────────── */
-function bubble(m, mine, whoLabel){
+function bubble(m, mine, whoLabel, msgId, canDelete){
   let att='';
   if(m.attachment_url){
     att = (m.attachment_type==='video')
@@ -409,7 +415,7 @@ function bubble(m, mine, whoLabel){
   return `<div class="bub ${mine?'mine':'theirs'}">
     ${whoLabel?`<span class="who">${esc(whoLabel)}</span>`:''}
     ${esc(m.body||'')}${att}
-    <span class="tm">${hh(m.created_at)}</span></div>`;
+    <span class="tm">${hh(m.created_at)}${canDelete?` <button class="ibtn" style="padding:2px 8px!important;font-size:10px!important;margin-left:6px;opacity:.6;" onclick="event.stopPropagation();deleteRoomMsg('${msgId}')">✕</button>`:''}</span></div>`;
 }
 
 /* ─────────── MENSAJES PRIVADOS (conversations + private_messages) ─────────── */
@@ -706,8 +712,7 @@ function subscribeLive(){
 }
 function notify(title, body){
   if(!('Notification' in window) || Notification.permission!=='granted') return;
-  try{ new Notification(title, { body: (body||'').slice(0,120), icon:'corona.png' }); }catch(e){}
-  if(window.showToast) window.showToast({ title, body });
+try{ new Notification(title, { body: (body||'').slice(0,120), icon:'corona-chat.png' }); }catch(e){}  if(window.showToast) window.showToast({ title, body });
 }
 async function updateBadges(){
   if(!me) return;
