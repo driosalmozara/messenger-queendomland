@@ -339,6 +339,7 @@ async function loadRoomMsgs(id){
   box.scrollTop=box.scrollHeight;
 }
 async function sendRoomMsg(){
+  const pop=document.getElementById('emo-pop'); if(pop) pop.remove();
   const inp=document.getElementById('msg-in'); const body=inp.value.trim();
   if(!body || !convMode || convMode.type!=='room') return;
   if(convMode.ban) return alert('🚫 Tu acceso a esta sala está prohibido.');
@@ -388,47 +389,37 @@ function showTyping(name){
   clearTimeout(typingTimer); typingTimer=setTimeout(()=>{ lbl.textContent=''; },2200);
 }
 
-/* ─────────── EMOJIS ─────────── */
-const EMOJIS=['😀','😂','😍','😘','😎','🥰','','😡','','👍','👎','','💪','❤️','💛','💜','🖤','','👑','✨','🤍','','','🔥',''];
+<script>
+/* ── EMOJIS: sin celdas vacías ── */
+const EMOJIS=['😀','😂','😍','😘','😎','🥰','😡','👍','👎','💪','❤️','💛','💜','🖤','👑','✨','🤍','🔥','😈','🙏','💋','🌹','','👠'];
+
 function openEmojiPicker(inputId){
   const old=document.getElementById('emo-pop'); if(old){ old.remove(); return; }
   const pop=document.createElement('div'); pop.id='emo-pop';
-  pop.style.cssText='position:fixed;bottom:74px;left:10px;right:10px;max-width:420px;margin:0 auto;background:#131014;border:1px solid rgba(201,162,75,.5);border-radius:14px;padding:10px;display:grid;grid-template-columns:repeat(7,1fr);gap:4px;z-index:9999;max-height:220px;overflow-y:auto;';
-  pop.innerHTML=EMOJIS.map(e=>`<button style="background:transparent;border:none;font-size:22px;cursor:pointer;padding:4px;" onclick="insEmo('${inputId}','${e}')">${e}</button>`).join('');
+  pop.style.cssText='position:fixed;left:10px;right:10px;max-width:420px;margin:0 auto;background:#131014;border:1px solid rgba(201,162,75,.5);border-radius:14px;padding:10px;z-index:9999;max-height:190px;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.6);';
+  /* Anclado JUSTO ENCIMA de la fila de entrada: el campo y el ➤ quedan libres debajo */
+  const row=document.getElementById('conv-input');
+  const top=row?row.getBoundingClientRect().top:(window.innerHeight-150);
+  pop.style.bottom=(window.innerHeight-top+8)+'px';
+  pop.innerHTML=
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'+
+      '<span style="color:#c9a24b;font-size:11px;">Toca un emoji para insertarlo</span>'+
+      '<button id="emo-close" style="background:transparent;border:none;color:#a1a1aa;font-size:15px;cursor:pointer;padding:2px 8px;">✕</button>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;">'+
+      EMOJIS.map(e=>'<button style="background:transparent;border:none;font-size:21px;cursor:pointer;padding:4px;" onclick="insEmo(\''+inputId+'\',\''+e+'\')">'+e+'</button>').join('')+
+    '</div>';
   document.body.appendChild(pop);
+  pop.querySelector('#emo-close').addEventListener('click',function(ev){ ev.stopPropagation(); pop.remove(); });
   setTimeout(()=>document.addEventListener('click', function h(ev){ if(!pop.contains(ev.target)){ pop.remove(); document.removeEventListener('click',h); } }),0);
 }
-function insEmo(inputId,e){ const i=document.getElementById(inputId); if(i){ i.value+=e; i.focus(); } }
 
-/* ─────────── SILENCIOS DE STAFF (política de la casa) ─────────── */
-function openMembersModal(){
-  const list=(people||[]).filter(p=>p.id!==me.id);
-  const ov=document.createElement('div'); ov.id='members-ov';
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:99993;display:flex;align-items:center;justify-content:center;padding:16px;';
-  ov.innerHTML=`<div style="background:#131014;border:1px solid rgba(201,162,75,.5);border-radius:16px;padding:18px;max-width:480px;width:100%;max-height:72vh;overflow-y:auto;">
-    <h3 style="margin:0 0 8px;color:#e7cf9a;">👥 Miembros y silencios</h3>
-    <p class="small">Política de la casa: Admin silencia a cualquier sumiso; Moderadoras y Perros Guardianes solo a sumisos sin Dueña propia.</p>
-    ${list.map(p=>{
-      const can=p.role==='submissive' && (isSuperAd || ((isMod||isChatMod) && !ownedSet.has(p.id)));
-      return `<div style="display:flex;gap:8px;align-items:center;margin:6px 0;">
-        <span class="small" style="flex:1;">${p.role==='dominant'?'♛':''} <b>${esc(p.display_name)}</b>${p.chat_muted?' 🔇':''}</span>
-        ${can?`<button class="ibtn" onclick="staffMute('${p.id}',${!p.chat_muted})">${p.chat_muted?'🔊 Devolver voz':'🔇 Silenciar'}</button>`:''}
-      </div>`;
-    }).join('')}
-    <p style="text-align:center;margin-top:12px;"><button class="ibtn" onclick="document.getElementById('members-ov').remove()">Cerrar</button></p>
-  </div>`;
-  ov.onclick=e=>{ if(e.target===ov) ov.remove(); };
-  document.body.appendChild(ov);
+function insEmo(inputId,e){
+  const i=document.getElementById(inputId); if(!i) return;
+  i.value+=e;
+  i.focus();
 }
-async function staffMute(id,on){
-  const myRole=isSuperAd?'admin':(isMod?'moderator':'chatmod');
-  const { error } = await db.from('profiles').update({ chat_muted:on, chat_muted_by:me.id, chat_muted_by_role:myRole }).eq('id',id);
-  if(error) return alert(error.message);
-  const p=(people||[]).find(x=>x.id===id); if(p) p.chat_muted=on;
-  document.getElementById('members-ov')?.remove();
-  openMembersModal();
-}
-
+</script>
 /* ─────────── BURBUJAS ─────────── */
 function bubble(m, mine, whoLabel, msgId, canDelete){
   let att='';
@@ -579,6 +570,7 @@ function pickDMFile(input){
   if(c) c.textContent = window.__pendDM ? '📎 '+window.__pendDM.name : '';
 }
 async function sendDM(){
+  const pop=document.getElementById('emo-pop'); if(pop) pop.remove();
   const inp=document.getElementById('msg-in'); const body=inp.value.trim();
   const file=window.__pendDM;
   if((!body && !file) || !convMode || convMode.type!=='dm') return;
