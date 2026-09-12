@@ -1,16 +1,14 @@
 {
-  "id": "messenger-queendomland",
   "name": "Messenger Queendomland",
   "short_name": "Messenger",
-  "description": "Chat y mensajes privados de la casa Queendomland.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
   "background_color": "#0d0c0a",
   "theme_color": "#0d0c0a",
+  "id": "messenger-queendomland",
   "icons": [
-    { "src": "./corona.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "./corona.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "corona-chat.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "corona-chat.png", "sizes": "192x192", "type": "image/png", "purpose": "any" }
   ]
 }
