@@ -75,6 +75,27 @@ main{flex:1;min-height:0;overflow-y:auto;padding:12px;width:100%;max-width:760px
 .small{color:#a1a1aa;font-size:12px}
 </style>
 </head>
+  <script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => {
+        console.log('SW registrado para Queendomland:', reg.scope);
+        // Escuchar actualizaciones en segundo plano
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // Hay una nueva versión lista, podrías mostrar un Toast diciendo "Hay updates, recarga"
+              if(typeof showToast === 'function') showToast('Nueva versión de la casa disponible. Recarga para aplicar.', 'info');
+            }
+          });
+        });
+      })
+      .catch(err => console.error('Error al registrar SW:', err));
+  });
+}
+</script>
 <body>
 <div id="topbar">
   <button class="tbtn hidden" id="back-btn" onclick="closeConv()">←</button>
