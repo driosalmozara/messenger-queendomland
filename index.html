@@ -106,6 +106,26 @@ window.addEventListener('error', function(e){
   const b = document.getElementById('errbar');
   if (b) { b.style.display='block'; b.textContent = '⚠ Error: ' + (e.message || 'desconocido'); }
 });
+  window.addEventListener('unhandledrejection', function(e){
+  const b = document.getElementById('errbar');
+  if (b) { b.style.display='block'; b.innerHTML = '⚠ ' + ((e.reason && e.reason.message) || e.reason || 'Error inesperado') + ' <button class="ibtn" onclick="location.reload()">Reintentar</button>'; }
+});
+if ('caches' in window) {
+  caches.keys().then(function(ks){ ks.forEach(function(k){ if (k !== 'ql-messenger-v2') caches.delete(k); }); });
+}
+function fatal(msg){
+  const b = document.getElementById('errbar');
+  if (b) { b.style.display='block'; b.innerHTML = '⚠ ' + msg + ' <button class="ibtn" onclick="location.reload()">Reintentar</button>'; }
+}
+function resync(){
+  if (document.hidden) return;
+  try {
+    subscribeLive();
+    updateBadges();
+    if (convMode && convMode.type === 'room') loadRoomMsgs(convMode.id);
+    if (convMode && convMode.type === 'dm') loadThreadMsgs(convMode.convId);
+  } catch(e){}
+}
 
 function esc(v){ return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function hh(t){ const d=new Date(t); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
@@ -164,19 +184,25 @@ async function gateLogin(){
 /* ─────────── SESIÓN, ROLES Y VISTAS ─────────── */
 async function start(user){
   me = user;
-  const { data: p } = await db.from('profiles').select('*').eq('id', me.id).maybeSingle();
-  profile = p;
-  if(!profile){ alert('Completa tu perfil en la casa primero.'); location.href='https://queendomland.com/index.html'; return; }
-  if (localStorage.getItem('flr_impersonating')==='1'){
-    const d=document.getElementById('mirror-dot'); d.style.display='inline-block'; d.title='Modo espejo activo';
+  try {
+    const { data: p } = await db.from('profiles').select('*').eq('id', me.id).maybeSingle();
+    profile = p;
+    if(!profile){ alert('Completa tu perfil en la casa primero.'); location.href='https://queendomland.com/index.html'; return; }
+    if (localStorage.getItem('flr_impersonating')==='1'){
+      const d=document.getElementById('mirror-dot'); d.style.display='inline-block'; d.title='Modo espejo activo';
+    }
+    await loadStaffFlags();
+    await loadRooms();
+    goView('rooms');
+    subscribeLive();
+    updateBadges();
+    setInterval(updateBadges, 30000);
+    document.addEventListener('click', function once(){ askNotif(); document.removeEventListener('click', once); });
+    document.addEventListener('visibilitychange', resync);
+    window.addEventListener('online', resync);
+  } catch(e){
+    fatal('No se pudo cargar tu sesión: ' + (e.message || e));
   }
-  await loadStaffFlags();
-  await loadRooms();
-  goView('rooms');
-  subscribeLive();
-  updateBadges();
-  setInterval(updateBadges, 30000);
-  document.addEventListener('click', function once(){ askNotif(); document.removeEventListener('click', once); });
 }
 async function loadStaffFlags(){
   const [s, m, c, own, ppl] = await Promise.all([
@@ -568,7 +594,7 @@ async function renderSettings(){
   }
   html += `<div class="rowitem" onclick="location.href='https://queendomland.com/index.html'"><div class="ava">🏛</div><div class="meta"><b>Ir a la casa</b><span>Queendomland completa</span></div></div>
   <div class="rowitem" onclick="logout()"><div class="ava">🚪</div><div class="meta"><b>Cerrar sesión</b><span>Sal de Messenger</span></div></div>
-  <p class="empty">Messenger Queendomland · v3 · Contenido simbólico y consensuado entre adultos.</p>`;
+  <p class="empty">Messenger Queendomland · v4 · Contenido simbólico y consensuado entre adultos.</p>`;
   s.innerHTML = html;
 }
 async function enrollBio(){
@@ -710,7 +736,24 @@ init();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('./sw.js').then(function(reg){
+      reg.update();
+      reg.addEventListener('updatefound', function(){
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function(){
+          if (nw.state === 'installed') nw.postMessage('skipWaiting');
+        });
+      });
+      navigator.serviceWorker.addEventListener('controllerchange', function(){
+        if (!sessionStorage.getItem('msgr_sw_reloaded')) {
+          sessionStorage.setItem('msgr_sw_reloaded','1');
+          location.reload();
+        }
+      });
+    });
+  });
 }
 </script>
 </body>
