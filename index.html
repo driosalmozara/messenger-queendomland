@@ -151,7 +151,6 @@ function resync(){
     if (convMode && convMode.type === 'dm') loadThreadMsgs(convMode.convId);
   } catch(e){}
 }
-
 function esc(v){ return String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function hh(t){ const d=new Date(t); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function bufToB64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
@@ -220,6 +219,8 @@ async function start(user){
     await loadRooms();
     goView('rooms');
     subscribeLive();
+    setBell();          // ✅ NUEVO: refleja el permiso ya concedido
+    ensurePushSub();    // ✅ NUEVO: re-registra el endpoint si caducó
     updateBadges();
     setInterval(updateBadges, 30000);
     document.addEventListener('click', function once(){ askNotif(); document.removeEventListener('click', once); });
@@ -261,14 +262,73 @@ function closeConv(){
 }
 function askNotif(){
   if(!('Notification' in window)) return;
-  if(Notification.permission==='default') Notification.requestPermission().then(setBell);
-  else setBell();
-}
-function setBell(){
-  const b=document.getElementById('bell-btn');
-  b.textContent = ('Notification' in window && Notification.permission==='granted') ? '🔔' : '🔕';
+  if(Notification.permission === 'default'){
+    Notification.requestPermission().then(p => {
+      setBell();
+      if(p === 'granted') ensurePushSub();
+    });
+  } else {
+    setBell();
+    if(Notification.permission === 'granted') ensurePushSub();
+  }
 }
 
+function setBell(){
+  const b = document.getElementById('bell-btn');
+  if(!b) return;
+  if('Notification' in window && Notification.permission === 'granted'){
+    b.textContent = '🔔';
+    b.title = 'Notificaciones activadas';
+  } else if('Notification' in window && Notification.permission === 'denied'){
+    b.textContent = '🔕';
+    b.title = 'Bloqueadas en el navegador';
+  } else {
+    b.textContent = '🔕';
+    b.title = 'Activar notificaciones';
+  }
+}
+
+  /* ── Conversión VAPID para Push API ── */
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const rawData = window.atob(base64);
+  return new Uint8Array(rawData.length).map((_,i) => rawData.charCodeAt(i));
+}
+
+/* ── Suscribir y guardar endpoint en Supabase ── */
+async function ensurePushSub(){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  if(!('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+
+    if(!subscription){
+      // ⚠️ REEMPLAZA con tu clave VAPID pública (generada en backend)
+      const { data: vk } = await db.from('app_settings')
+        .select('value').eq('key','vapid_public').maybeSingle();
+      if(!vk || !vk.value) return;
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vk.value)
+      });
+    }
+
+    const rawP256 = subscription.getKey('p256dh');
+    const rawAuth = subscription.getKey('auth');
+    const p256dh = btoa(String.fromCharCode(...new Uint8Array(rawP256)));
+    const auth   = btoa(String.fromCharCode(...new Uint8Array(rawAuth)));
+
+    await db.from('push_subscriptions').upsert({
+      user_id: me.id,
+      endpoint: subscription.endpoint,
+      p256dh: p256dh,
+      auth: auth,
+      platform: /Android|iPhone|iPad/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+    }, { onConflict: 'endpoint' });
+  } catch(e){ console.warn('Push sub error:', e); }
+}
 /* ─────────── CHAT: SALAS ─────────── */
 async function isSuper(){ const { data } = await db.rpc('is_superadmin'); return !!data; }
 async function loadRooms(){
@@ -728,8 +788,23 @@ function subscribeLive(){
     .subscribe();
 }
 function notify(title, body){
-  if(!('Notification' in window) || Notification.permission!=='granted') return;
-try{ new Notification(title, { body: (body||'').slice(0,120), icon:'corona-chat.png' }); }catch(e){}  if(window.showToast) window.showToast({ title, body });
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  const opts = {
+    body: (body||'').slice(0,120),
+    icon: 'corona-chat.png',
+    badge: 'corona-chat.png',
+    vibrate: [200, 100, 200],
+    tag: 'queendomland-messenger',
+    renotify: true
+  };
+  if(navigator.serviceWorker && navigator.serviceWorker.controller){
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(title, opts);
+    }).catch(() => { try { new Notification(title, opts); } catch(e){} });
+  } else {
+    try { new Notification(title, opts); } catch(e){}
+  }
+  if(window.showToast) window.showToast({ title, body });
 }
 async function updateBadges(){
   if(!me) return;
