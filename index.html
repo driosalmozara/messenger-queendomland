@@ -411,6 +411,7 @@ async function sendRoomMsg(){
   const { error } = await db.from('chat_messages').insert({ user_id: me.id, body, room_id: convMode.id });
   if(error) return alert(error.message);
   inp.value='';
+  await loadRoomMsgs(convMode.id);   // ✅ repinta la sala al instante (y hace scroll al fondo)
   await sendRoomAttachment();
 }
 function pickRoomFile(input){
