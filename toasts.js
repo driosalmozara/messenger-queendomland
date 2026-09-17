@@ -18,7 +18,8 @@
   async function check(client){
     var s = await client.auth.getSession();
     var isAdmin = false;
-    if (s.data && s.data.session) { var r = await client.rpc('am_i_superadmin'); isAdmin = !!r; }
+    /* ✅ FIX 1: era !!r (siempre true con sesión) y cualquier miembro saltaba el mantenimiento */
+    if (s.data && s.data.session) { var r = await client.rpc('am_i_superadmin'); isAdmin = !!r.data; }
     var row = await client.from('app_settings').select('value').eq('key','maintenance').maybeSingle();
     var on = !!(row.data && row.data.value === '1');
     if (on && !isAdmin) { if (!gateEl) buildGate(); } else removeGate();
@@ -89,7 +90,7 @@
     window.location.href = 'https://www.google.com';
   };
 })();
-/* ══ TRONO DE ORO — toasts.js v5 ══ */
+/* ══ TRONO DE ORO — toasts.js del Messenger ══ */
 
 /* ── 1) Favicon ── */
 (function(){
@@ -136,15 +137,16 @@ async function ensurePushSubscription(client){
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
-    const r = await fetch('/api/vapid-public');
-    const j = await r.json();
-    if (!j.publicKey) return;
+    /* ✅ FIX 2: '/api/vapid-public' no existe en GitHub Pages (404 silencioso).
+       La clave pública vive en app_settings, igual que en el index.html. */
+    const vk = await client.from('app_settings').select('value').eq('key','vapid_public').maybeSingle();
+    if (!vk.data || !vk.data.value) return;
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: b64ToU8(j.publicKey)
+        applicationServerKey: b64ToU8(vk.data.value)
       });
     }
     const js = sub.toJSON();
@@ -169,7 +171,7 @@ function notificacionSistema(title, body){
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready.then(function(reg){
-reg.showNotification(title || '💬 Messenger Queendomland', { body: body || '', icon: 'corona-chat.png', badge: 'corona-chat.png' });
+      reg.showNotification(title || '💬 Messenger Queendomland', { body: body || '', icon: 'corona-chat.png', badge: 'corona-chat.png' });
     }).catch(function(){});
   }
 }
@@ -381,6 +383,7 @@ function getClient(){
     items.forEach(function(it){
       var b = document.createElement('button');
       b.textContent = it[0];
+      /* ✅ FIX 3: en el repo quedó "it1;" (no ejecuta la acción del menú) */
       b.onclick = function(){ it[1](); };
       menu.appendChild(b);
     });
@@ -477,7 +480,7 @@ function getClient(){
   };
 })();
 
-/* ── 14) Nav reina: 4 botones nobles + menú Más con submenús ── */
+/* ── 14) Nav reina (inerte en el Messenger: no hay <header>, vive por paridad con la casa) ── */
 (function(){
   var PRIMARY = [
     ['index.html?stay=1', 'Mi perfil'],
@@ -487,8 +490,6 @@ function getClient(){
   ];
   var OTHERS = [
     ['muro.html', 'Muro'],
-    // disponible.html eliminado: ahora vive dentro del Salón y de Mi perfil
-    // avatar.html eliminado: la foto vive dentro de Mi perfil (index.html#my-profile-card)
     { title: 'Gestión de sumisos en propiedad', items: [
       ['disciplina.html', '⚖ Disciplina'],
       ['contrato.html', '📜 Contrato'],
@@ -509,7 +510,7 @@ function getClient(){
     ['terminos.html', 'Términos'],
     ['faq.html', '❓ Preguntas frecuentes']
   ];
-  var flags = { staff: false, admin: false };
+  var flags = { staff: false, admin: false, mod: false, ped: false };
   var bellClient = null, bellUid = null;
   function refreshBell(client, me){
     client.from('notifications').select('*', { count: 'exact', head: true })
@@ -519,13 +520,15 @@ function getClient(){
         if (!b) return;
         if ((r.count || 0) > 0) b.classList.add('qbell-glow'); else b.classList.remove('qbell-glow');
       });
-  }  var lock = false, scheduled = false;
+  }
+  var lock = false, scheduled = false;
   var currentWrap = null;
   var st = document.createElement('style');
   st.textContent =
     '.qnav{display:flex;gap:14px;align-items:center;flex-wrap:wrap}' +
     '.qwrap{position:relative;display:inline-block}' +
-    '.qbell-glow{box-shadow:0 0 12px rgba(212,175,55,.85),0 0 30px rgba(212,175,55,.4);animation:glowPulse 2.2s ease-in-out infinite}' +    '.qbtn{background:transparent;color:#d4af37;border:1px solid #d4af37;border-radius:10px;padding:6px 12px;cursor:pointer;font-size:13px}' +
+    '.qbell-glow{box-shadow:0 0 12px rgba(212,175,55,.85),0 0 30px rgba(212,175,55,.4);animation:glowPulse 2.2s ease-in-out infinite}' +
+    '.qbtn{background:transparent;color:#d4af37;border:1px solid #d4af37;border-radius:10px;padding:6px 12px;cursor:pointer;font-size:13px}' +
     '.qmenu{display:none;position:absolute;right:0;top:115%;background:rgba(13,10,14,.98);border:1px solid rgba(212,175,55,.5);border-radius:12px;padding:8px;min-width:220px;max-height:min(75vh,580px);overflow-y:auto;z-index:99996;flex-direction:column;gap:2px;box-shadow:0 18px 50px rgba(0,0,0,.6)}' +
     '.qmenu.open{display:flex}' +
     '.qmenu a{padding:6px 10px;border-radius:8px;font-size:13px;display:block}' +
@@ -545,7 +548,8 @@ function getClient(){
       '.qmenu a{font-size:14px !important;padding:10px 12px !important}' +
       '.qmenu .qgroup-items a{font-size:13px !important}' +
       '.qmenu .qgroup-title{font-size:10px !important}' +
-    '}';  document.head.appendChild(st);
+    '}';
+  document.head.appendChild(st);
   function currentFile(){ return (location.pathname.split('/').pop() || 'index.html'); }
   function makeLink(href, label){
     var a = document.createElement('a');
@@ -586,8 +590,6 @@ function getClient(){
     var wrap = document.createElement('div'); wrap.className = 'qwrap';
     var btn = document.createElement('button'); btn.className = 'qbtn'; btn.innerHTML = '☰ Más';
     var menu = document.createElement('div'); menu.className = 'qmenu';
-
-    // Sección Staff (solo admins y moderadoras, NO perros guardianes)
     if (flags.staff) {
       var staffSection = document.createElement('div');
       staffSection.className = 'qstaff-section';
@@ -600,14 +602,12 @@ function getClient(){
       var staffItems = document.createElement('div');
       staffItems.className = 'qgroup-items';
       if (flags.admin) staffItems.appendChild(makeLink('admin.html', '♛ Admin'));
-      staffItems.appendChild(makeLink('moderacion.html', '🛡 Moderación'));
+      if (flags.admin || flags.mod) staffItems.appendChild(makeLink('moderacion.html', '🛡 Moderación'));
       staffItems.appendChild(makeLink('aprobaciones.html', '📥 Aprobaciones'));
       staffGroup.appendChild(staffItems);
       staffSection.appendChild(staffGroup);
       menu.appendChild(staffSection);
     }
-
-    // Resto del menú
     OTHERS.forEach(function(o){
       if (Array.isArray(o)) {
         menu.appendChild(makeLink(o[0], o[1]));
@@ -615,7 +615,6 @@ function getClient(){
         menu.appendChild(makeGroup(o.title, o.items));
       }
     });
-
     wrap.appendChild(btn); wrap.appendChild(menu);
     btn.onclick = function(e){ e.stopPropagation(); menu.classList.toggle('open'); };
     nav.appendChild(wrap);
@@ -642,15 +641,18 @@ function getClient(){
   });
   function init(){
     rebuild();
-     waitForSupabase(async function(){
+    waitForSupabase(async function(){
       var client = getClient();
       var s = await client.auth.getSession();
       if (!s.data.session) return;
       var uid = s.data.session.user.id;
       var adm = await client.from('app_admins').select('user_id').eq('user_id', uid).maybeSingle();
       var mod = await client.from('app_moderators').select('user_id').eq('user_id', uid).maybeSingle();
+      var ped = await client.rpc('am_i_pedigree');
       flags.admin = !!adm.data;
-      flags.staff = !!(adm.data || mod.data);
+      flags.mod = !!mod.data;
+      flags.ped = !!ped.data;
+      flags.staff = !!(adm.data || mod.data || flags.ped);
       bellClient = client; bellUid = uid;
       rebuild();
       refreshBell(client, uid);
